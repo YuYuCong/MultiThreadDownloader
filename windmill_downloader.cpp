@@ -14,31 +14,80 @@
 #include <vector>
 
 namespace windmill {
-namespace common {
+namespace {
+const unsigned int kMaxAllowedWorkers = 64;  // max allowed threads
+const unsigned int kMaxAllowedTasks = 64 + 32; \
+  // max allowed tasks, working threads num is 64, wait queue num is 32
+}  // namespace
+
+
 /**
  * Define a thread pool.
  */
 class ThreadPool {
  public:
-  ThreadPool(unsigned int n = std::thread::hardware_concurrency());
+  ThreadPool(unsigned int workers_num = std::thread::hardware_concurrency(),
+             unsigned int max_tasks_num = kMaxAllowedTasks);
   ~ThreadPool();
 
+  /*
+   * CommitTask
+   * submit a task, template
+   */
   template <class F, class... Args>
   auto CommitTask(F &&f, Args &&... args)
       -> std::future<typename std::result_of<F(Args...)>::type>;
 
-  bool Finished();
-  unsigned int GetProcessed();
+  /*
+   * Shutdown
+   * Shutdown the threadpool by user
+   */
+  void Shutdown();
+
+  /*
+   * Idle
+   * return true if finished, false if busy
+   */
+  bool Idle();
+
+  /*
+   * PrintTop
+   * Top
+   * Monitor of the threadpool
+   */ 
+  void PrintTop();
+
  private:
+  unsigned int workers_num_;
+  unsigned int max_tasks_num_; //remainning_tasks + current_working < max_tasks_num
+
   std::vector<std::thread> workers_;
   std::deque<std::function<void()>> tasks_;
-  std::mutex queue_mutex_;
+
+  std::mutex tasks_queue_mutex_;
   std::condition_variable cv_task_;
-  unsigned int busy_;
-  std::atomic_uint processed_;
+
   bool shutdown_;
+  std::atomic_uint current_running_tasks_num_;
+  std::atomic_uint total_processed_tasks_num_;
 
   void ThreadProcess();
+
+  struct Top {
+    Top(int current_workers_num, int current_running_tasks_num,
+        int current_remaining_tasks_num, int total_processed_tasks_num) {
+      this->current_workers_num = current_workers_num;
+      this->current_running_tasks_num = current_running_tasks_num;
+      this->current_remaining_tasks_num = current_remaining_tasks_num;
+      this->total_processed_tasks_num = total_processed_tasks_num;
+    }
+    int current_workers_num;
+    int current_running_tasks_num;
+    int current_remaining_tasks_num;
+    int total_processed_tasks_num;
+  };
+
+  std::shared_ptr<Top> GetTop();
 };
 
 template <class F, class... Args>
@@ -51,7 +100,7 @@ auto ThreadPool::CommitTask(F &&f, Args &&... args)
 
   std::future<return_type> res = task->get_future();
   {
-    std::unique_lock<std::mutex> lock(queue_mutex_);
+    std::unique_lock<std::mutex> lock(tasks_queue_mutex_);
     // don't allow enqueueing after stopping the pool
     if (shutdown_) throw std::runtime_error("enqueue on stopped ThreadPool");
 
@@ -61,49 +110,88 @@ auto ThreadPool::CommitTask(F &&f, Args &&... args)
   return res;
 }
 
-ThreadPool::ThreadPool(unsigned int n) : busy_(), processed_(), shutdown_() {
-  for (unsigned int i = 0; i < n; ++i) {
+ThreadPool::ThreadPool(unsigned int workers_num, unsigned int max_tasks_num)
+    : workers_num_(workers_num < kMaxAllowedWorkers ? workers_num
+                                                    : kMaxAllowedWorkers),
+      max_tasks_num_(max_tasks_num < kMaxAllowedTasks ? max_tasks_num
+                                                      : kMaxAllowedTasks),
+      shutdown_(false),
+      current_running_tasks_num_(0),
+      total_processed_tasks_num_(0) {
+  for (unsigned int i = 0; i < workers_num_; ++i) {
     workers_.emplace_back(std::bind(&ThreadPool::ThreadProcess, this));
   }
 }
 
 ThreadPool::~ThreadPool() {
-  std::unique_lock<std::mutex> latch(queue_mutex_);
+  std::unique_lock<std::mutex> latch(tasks_queue_mutex_);
   shutdown_ = true;
   latch.unlock();
   cv_task_.notify_all();
-  for (auto &worker : workers_) worker.join();
+  for (auto &worker : workers_) {
+    if (worker.joinable()) {
+      worker.join();
+    }
+  }
 }
 
 void ThreadPool::ThreadProcess() {
   while (true) {
-    std::unique_lock<std::mutex> latch(queue_mutex_);
+    std::unique_lock<std::mutex> latch(tasks_queue_mutex_);
     cv_task_.wait(latch, [this]() { return shutdown_ || !tasks_.empty(); });
     if (shutdown_) {
       break;
     }
 
     if (!tasks_.empty()) {
-      ++busy_;
+      ++current_running_tasks_num_;
       auto task = tasks_.front();
       tasks_.pop_front();
       latch.unlock();
       task();
-      ++processed_;
+      ++total_processed_tasks_num_;
       latch.lock();
-      --busy_;
+      --current_running_tasks_num_;
     }
   }
 }
 
-bool ThreadPool::Finished() {
-  std::unique_lock<std::mutex> lock(queue_mutex_);
-  return tasks_.empty() && (busy_ == 0);
+void ThreadPool::Shutdown() {
+  printf("shutdown now\n");
+  std::unique_lock<std::mutex> latch(tasks_queue_mutex_);
+  shutdown_ = true;
+  latch.unlock();
+  cv_task_.notify_all();
+  for (auto &worker : workers_) {
+    if (worker.joinable()) {
+      worker.join();
+    }
+  }
 }
 
-unsigned int ThreadPool::GetProcessed() { return processed_; }
+bool ThreadPool::Idle() {
+  std::unique_lock<std::mutex> lock(tasks_queue_mutex_);
+  return (tasks_.empty() && (current_running_tasks_num_ == 0));
+}
 
-}  // namespace common
+std::shared_ptr<ThreadPool::Top> ThreadPool::GetTop() {
+  std::unique_lock<std::mutex> latch(tasks_queue_mutex_);
+  return std::make_shared<Top>(Top(workers_.size(), current_running_tasks_num_,
+                                   tasks_.size(), total_processed_tasks_num_));
+}
+
+void ThreadPool::PrintTop() {
+  auto thread_pool_monitor = GetTop();
+  printf(
+      "[ThreadPool Top] current_workers:%d | current_working:%d | "
+      "remaining_tasks:%d | "
+      "total_processed_tasks_num:%d\n",
+      thread_pool_monitor->current_workers_num,
+      thread_pool_monitor->current_running_tasks_num,
+      thread_pool_monitor->current_remaining_tasks_num,
+      thread_pool_monitor->total_processed_tasks_num);
+}
+
 }  // namespace windmill
 
 
@@ -113,17 +201,16 @@ unsigned int ThreadPool::GetProcessed() { return processed_; }
 #define PrintEndl std::cout << std::endl
 
 namespace windmill {
-namespace utility {
 
 const int kMaxAllowedReconnectTimes = 15;
 
 /**
- * Define a WebDownloader.
+ * Define a WindmillDownloader.
  */
-class WebDownloader {
+class WindmillDownloader {
  public:
-  WebDownloader();
-  ~WebDownloader();
+  WindmillDownloader();
+  ~WindmillDownloader();
   bool DownloadMission(const int thread_num, const std::string &url,
                        const std::string &out_file);
 
@@ -149,7 +236,7 @@ class WebDownloader {
   static void PrintDownloadProgress(double now_downloaded,
                                     double total_to_download);
 
-  static int RangeDownloadThreadIns(WebDownloader *pthis,
+  static int RangeDownloadThreadIns(WindmillDownloader *pthis,
                                     const std::string &url,
                                     std::shared_ptr<DownloadNode> pnode);
 
@@ -169,14 +256,14 @@ class WebDownloader {
   std::vector<std::shared_ptr<DownloadNode>> failed_nodes_;
 };
 
-WebDownloader::WebDownloader()
+WindmillDownloader::WindmillDownloader()
     : downloading_thread_count_(0),
       failed_nodes_count_(0),
       max_reconnect_times_(kMaxAllowedReconnectTimes) {}
 
-WebDownloader::~WebDownloader() {}
+WindmillDownloader::~WindmillDownloader() {}
 
-long WebDownloader::GetDownloadFileLenth(const std::string url) {
+long WindmillDownloader::GetDownloadFileLenth(const std::string url) {
   double download_file_lenth = 0;
   CURL *curl = curl_easy_init();
   if (NULL == curl) {
@@ -196,7 +283,7 @@ long WebDownloader::GetDownloadFileLenth(const std::string url) {
   return download_file_lenth;
 }
 
-size_t WebDownloader::MultiThreadWriterCallback(void *ptr, size_t size,
+size_t WindmillDownloader::MultiThreadWriterCallback(void *ptr, size_t size,
                                                 size_t nmemb, void *userdata) {
   DownloadNode *node = (DownloadNode *)userdata;
   size_t written = 0;
@@ -214,7 +301,7 @@ size_t WebDownloader::MultiThreadWriterCallback(void *ptr, size_t size,
   return written;
 }
 
-int WebDownloader::MultiThreadDownloadProgressCallback(void *ptr,
+int WindmillDownloader::MultiThreadDownloadProgressCallback(void *ptr,
                                                        double total_to_download,
                                                        double now_downloaded,
                                                        double total_to_upload,
@@ -254,7 +341,7 @@ int WebDownloader::MultiThreadDownloadProgressCallback(void *ptr,
   return 0;
 }
 
-void WebDownloader::PrintDownloadProgress(double now_downloaded,
+void WindmillDownloader::PrintDownloadProgress(double now_downloaded,
                                           double total_to_download) {
   LOG(ERROR) << "[download] progress: " << now_downloaded / 1024 << "/"
              << total_to_download / 1024 << " kbytes  "
@@ -262,13 +349,13 @@ void WebDownloader::PrintDownloadProgress(double now_downloaded,
   PrintEndl;
 }
 
-int WebDownloader::RangeDownloadThreadIns(WebDownloader *pthis,
+int WindmillDownloader::RangeDownloadThreadIns(WindmillDownloader *pthis,
                                           const std::string &url,
                                           std::shared_ptr<DownloadNode> pnode) {
   return pthis->RangeDownloadThread(url, pnode);
 }
 
-int WebDownloader::RangeDownloadThread(
+int WindmillDownloader::RangeDownloadThread(
     const std::string &url, std::shared_ptr<DownloadNode> download_node) {
   LOG(ERROR) << "launch download thread id:" << std::this_thread::get_id();
   PrintEndl;
@@ -310,7 +397,7 @@ int WebDownloader::RangeDownloadThread(
   return res;
 }
 
-bool WebDownloader::DownloadMission(const int thread_num,
+bool WindmillDownloader::DownloadMission(const int thread_num,
                                     const std::string &url,
                                     const std::string &out_file) {
   total_size_to_download_ = 0;
@@ -331,7 +418,7 @@ bool WebDownloader::DownloadMission(const int thread_num,
     return false;
   }
 
-  windmill::common::ThreadPool thread_pool(thread_num);
+  windmill::ThreadPool thread_pool(thread_num);
 
   long part_size = 2 * 1024 * 1024;
   int range_num = int(total_size_to_download_ / part_size) +
@@ -347,7 +434,7 @@ bool WebDownloader::DownloadMission(const int thread_num,
     download_node->fp = fp;
     download_node->reconnect_times = 0;
     downloading_thread_count_++;
-    thread_pool.CommitTask(&WebDownloader::RangeDownloadThreadIns, this, url,
+    thread_pool.CommitTask(&WindmillDownloader::RangeDownloadThreadIns, this, url,
                            download_node);
   }
 
@@ -373,7 +460,7 @@ bool WebDownloader::DownloadMission(const int thread_num,
         } else {
           i_node->fp = fp;
           downloading_thread_count_++;
-          thread_pool.CommitTask(&WebDownloader::RangeDownloadThreadIns, this,
+          thread_pool.CommitTask(&WindmillDownloader::RangeDownloadThreadIns, this,
                                  url, i_node);
         }
       }
@@ -399,20 +486,19 @@ bool WebDownloader::DownloadMission(const int thread_num,
   return true;
 }
 
-long WebDownloader::total_size_to_download_ = 0;
-int WebDownloader::total_download_last_percent_ = -1;
+long WindmillDownloader::total_size_to_download_ = 0;
+int WindmillDownloader::total_download_last_percent_ = -1;
 std::unordered_map<uint64_t, double>
-    WebDownloader::download_process_statistics_;
-std::mutex WebDownloader::downloadprocess_mutex_;
-std::mutex WebDownloader::writer_mutex_;
+    WindmillDownloader::download_process_statistics_;
+std::mutex WindmillDownloader::downloadprocess_mutex_;
+std::mutex WindmillDownloader::writer_mutex_;
 
 bool DownloadMission(const int thread_num, const std::string &url,
                      const std::string &out_file) {
-  WebDownloader downloader;
+  WindmillDownloader downloader;
   return downloader.DownloadMission(thread_num, url, out_file);
 }
 
-}  // namespace utility
 }  // namespace windmill
 
 int main(int argc, char *argv[]) {
@@ -427,7 +513,7 @@ int main(int argc, char *argv[]) {
   std::string out_file = argv[3];
 
   time_t start_time = time(NULL);
-  bool result = windmill::utility::DownloadMission(thread_num, url, out_file);
+  bool result = windmill::DownloadMission(thread_num, url, out_file);
   LOG(ERROR) << "Download Info:"
              << "thread_num:" << thread_num
              << ",result:" << (result ? "successed" : "failed")
