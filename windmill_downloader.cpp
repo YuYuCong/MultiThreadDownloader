@@ -16,50 +16,41 @@
 namespace windmill {
 namespace {
 const unsigned int kMaxAllowedWorkers = 64;  // max allowed threads
-const unsigned int kMaxAllowedTasks = 64 + 32; \
-  // max allowed tasks, working threads num is 64, wait queue num is 32
 }  // namespace
-
 
 /**
  * Define a thread pool.
  */
 class ThreadPool {
  public:
-  ThreadPool(unsigned int workers_num = std::thread::hardware_concurrency(),
-             unsigned int max_tasks_num = kMaxAllowedTasks);
+  ThreadPool(unsigned int workers_num = std::thread::hardware_concurrency());
   ~ThreadPool();
 
-  /*
-   * CommitTask
-   * submit a task, template
+  /**
+   * submit a task
    */
   template <class F, class... Args>
-  auto CommitTask(F &&f, Args &&... args)
+  auto CommitTask(F &&f, Args &&...args)
       -> std::future<typename std::result_of<F(Args...)>::type>;
 
-  /*
-   * Shutdown
-   * Shutdown the threadpool by user
+  /**
+   * Shutdown the thread-pool by user
    */
   void Shutdown();
 
-  /*
-   * Idle
-   * return true if finished, false if busy
+  /**
+   * check if idle
+   * @return true if idle, false if busy
    */
-  bool Idle();
+  bool CheckIdle();
 
-  /*
-   * PrintTop
-   * Top
-   * Monitor of the threadpool
-   */ 
+  /**
+   * Monitor of the thread-pool
+   */
   void PrintTop();
 
  private:
   unsigned int workers_num_;
-  unsigned int max_tasks_num_; //remainning_tasks + current_working < max_tasks_num
 
   std::vector<std::thread> workers_;
   std::deque<std::function<void()>> tasks_;
@@ -91,7 +82,7 @@ class ThreadPool {
 };
 
 template <class F, class... Args>
-auto ThreadPool::CommitTask(F &&f, Args &&... args)
+auto ThreadPool::CommitTask(F &&f, Args &&...args)
     -> std::future<typename std::result_of<F(Args...)>::type> {
   using return_type = typename std::result_of<F(Args...)>::type;
 
@@ -102,7 +93,9 @@ auto ThreadPool::CommitTask(F &&f, Args &&... args)
   {
     std::unique_lock<std::mutex> lock(tasks_queue_mutex_);
     // don't allow enqueueing after stopping the pool
-    if (shutdown_) throw std::runtime_error("enqueue on stopped ThreadPool");
+    if (shutdown_) {
+      throw std::runtime_error("enqueue on stopped ThreadPool");
+    }
 
     tasks_.emplace_back([task]() { (*task)(); });
   }
@@ -110,11 +103,9 @@ auto ThreadPool::CommitTask(F &&f, Args &&... args)
   return res;
 }
 
-ThreadPool::ThreadPool(unsigned int workers_num, unsigned int max_tasks_num)
+ThreadPool::ThreadPool(unsigned int workers_num)
     : workers_num_(workers_num < kMaxAllowedWorkers ? workers_num
                                                     : kMaxAllowedWorkers),
-      max_tasks_num_(max_tasks_num < kMaxAllowedTasks ? max_tasks_num
-                                                      : kMaxAllowedTasks),
       shutdown_(false),
       current_running_tasks_num_(0),
       total_processed_tasks_num_(0) {
@@ -169,7 +160,7 @@ void ThreadPool::Shutdown() {
   }
 }
 
-bool ThreadPool::Idle() {
+bool ThreadPool::CheckIdle() {
   std::unique_lock<std::mutex> lock(tasks_queue_mutex_);
   return (tasks_.empty() && (current_running_tasks_num_ == 0));
 }
