@@ -151,13 +151,13 @@ int WindmillDownloader::RangeDownloadThread(
 
   int res = curl_easy_perform(curl);
 
+  node_manager_mutex_.lock();
   if (res != CURLE_OK) {
     LOG(ERROR) << "file range download failed";
-    node_manager_mutex_.lock();
     failed_nodes_.emplace_back(download_node);
-    node_manager_mutex_.unlock();
   }
   remaining_tasks_count_--;
+  node_manager_mutex_.unlock();
 
   curl_easy_cleanup(curl);
   return res;
@@ -229,7 +229,6 @@ bool WindmillDownloader::DownloadMission(const int thread_num,
       }
       failed_nodes_.clear();
     }
-    node_manager_mutex_.unlock();
 
 //    auto thread_pool_top = thread_pool.GetTop();
 //    LOG(INFO) << "current_workers_num:" << thread_pool_top->current_workers_num;
@@ -239,13 +238,14 @@ bool WindmillDownloader::DownloadMission(const int thread_num,
 //              << thread_pool_top->current_remaining_tasks_num;
 //    LOG(INFO) << "total_processed_tasks_num:"
 //              << thread_pool_top->total_processed_tasks_num;
-    if (remaining_tasks_count_ > 0) {
- //   LOG(INFO) << "remaining download tasks num:" << remaining_tasks_count_;
-      downloading = true;
-    } else {
+    if (remaining_tasks_count_ <= 0) {
       downloading = false;
       download_success = true;
+    } else {
+//    LOG(INFO) << "remaining download tasks num:" << remaining_tasks_count_;
     }
+    node_manager_mutex_.unlock();
+
     std::this_thread::sleep_for(std::chrono::microseconds(800));
   }
 
