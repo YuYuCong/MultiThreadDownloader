@@ -202,7 +202,10 @@ void ThreadPool::PrintTop() {
 
 namespace windmill {
 
+namespace {
 const int kMaxAllowedReconnectTimes = 15;
+const std::string kCurlCaInfo = "./cacert.pem";
+}  // namespace
 
 /**
  * Define a WindmillDownloader.
@@ -264,20 +267,33 @@ WindmillDownloader::WindmillDownloader()
 WindmillDownloader::~WindmillDownloader() {}
 
 long WindmillDownloader::GetDownloadFileLenth(const std::string url) {
-  double download_file_lenth = 0;
+  long download_file_lenth = -1;
   CURL *curl = curl_easy_init();
   if (NULL == curl) {
-    return CURLE_FAILED_INIT;
+    return -1;
   }
+
+  curl_off_t cl;
   curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
   curl_easy_setopt(curl, CURLOPT_HEADER, 1);
   curl_easy_setopt(curl, CURLOPT_NOBODY, 1);
+  //  if (boost::filesystem::exists(kCurlCaInfo)) {
+  curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L);
+  curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 2L);
+  curl_easy_setopt(curl, CURLOPT_CAINFO, kCurlCaInfo.c_str());
+  //  } else {
+  //    LOG(ERROR) << "curl ca file not exist, disable ssl";
+  //    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
+  //    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L);
+  //  }
   if (CURLE_OK == curl_easy_perform(curl)) {
-    curl_easy_getinfo(curl, CURLINFO_CONTENT_LENGTH_DOWNLOAD,
-                      &download_file_lenth);
+    curl_easy_getinfo(curl, CURLINFO_CONTENT_LENGTH_DOWNLOAD_T, &cl);
+    download_file_lenth = long(cl);
   } else {
-    download_file_lenth = -1;
+    LOG(ERROR) << "file size check failed!";
+    PrintEndl;
   }
+  curl_easy_cleanup(curl);
   LOG(ERROR) << "download_file_lenth: " << download_file_lenth;
   PrintEndl;
   return download_file_lenth;

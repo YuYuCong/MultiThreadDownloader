@@ -26,7 +26,7 @@ g++ ./windmill_downloader.cpp -o downloader -lcurl -lpthread -std=c++14
 ```shell
 ./downloader <thread_num> <url> <output_file>
 # example:
-./downloader 32 https://www.learningcontainer.com/wp-content/uploads/2020/05/sample-mp4-file.mp4 ./test.mp4
+./downloader 32 https://releases.ubuntu.com/20.04/ubuntu-20.04.3-desktop-amd64.iso ./ubuntu-20.04.3-desktop-amd64.iso
 ```
 
 #### Contact
