@@ -1,38 +1,49 @@
-# WindmillDownloader 
+# WindmillDownloader
+
 WindmillDownloader is a web downloader.
 
 #### Feature
 
 - Thread pool.
 - MultiThread Download.
-- Break point reconnect. 
+- Break point reconnect.
 
 #### Platform
+
 Ubuntu 16.04 or Ubuntu 18.04
 
 #### Dependencies
-- curl 
+
+- curl
 - thread
+- glog
+- boost (filesystem)
+
 ```
-sudo apt-get install curl
+$ sudo apt-get install curl
 ```
 
 #### Build
+
 ```shell
-g++ ./windmill_downloader.cpp -o downloader -lcurl -lpthread -std=c++14
+$ mkdir build
+$ cd build
+$ cmake ..
+$ make -j
 ```
 
 #### Usage
+
 ```shell
-./downloader <thread_num> <url> <output_file>
+$ ./windmill_downloader [--thread_num <thread_num>] --url <url> [--out_file <output_file>]
 # example:
-./downloader 32 https://www.learningcontainer.com/wp-content/uploads/2020/05/sample-mp4-file.mp4 ./test.mp4
+$ ./windmill_downloader --thread_num 32 --url https://releases.ubuntu.com/20.04/ubuntu-20.04.3-desktop-amd64.iso --out_file ./ubuntu-20.04.3-desktop-amd64.iso
+$ ./windmill_downloader --url http://www.gecif.net/articles/mathematiques/pi/pi_1_million.txt --out_file pi_1_million.txt
 ```
 
 #### Contact
 
 Feel free to contact me [windmillyucong@163.com](mailto:windmillyucong@163.com) anytime for anything.
-
 
 #### License
 
