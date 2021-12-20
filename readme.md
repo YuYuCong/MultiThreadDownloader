@@ -35,10 +35,10 @@ $ make -j
 #### Usage
 
 ```shell
-$ ./windmill_downloader <thread_num> <url> <output_file>
+$ ./windmill_downloader [--thread_num <thread_num>] --url <url> [--out_file <output_file>]
 # example:
-$ ./windmill_downloader 32 https://releases.ubuntu.com/20.04/ubuntu-20.04.3-desktop-amd64.iso ./ubuntu-20.04.3-desktop-amd64.iso
-$ ./windmill_downloader 8 http://www.gecif.net/articles/mathematiques/pi/pi_1_million.txt ./pi_1_million.txt
+$ ./windmill_downloader --thread_num 32 --url https://releases.ubuntu.com/20.04/ubuntu-20.04.3-desktop-amd64.iso --out_file ./ubuntu-20.04.3-desktop-amd64.iso
+$ ./windmill_downloader --url http://www.gecif.net/articles/mathematiques/pi/pi_1_million.txt --out_file pi_1_million.txt
 ```
 
 #### Contact
