@@ -17,7 +17,7 @@ ThreadPool::ThreadPool(unsigned int workers_num)
       current_running_tasks_num_(0),
       total_processed_tasks_num_(0) {
   for (unsigned int i = 0; i < workers_num_; ++i) {
-    workers_.emplace_back(std::bind(&ThreadPool::ThreadProcess, this));
+    workers_.emplace_back([this] { ThreadProcess(); });
   }
 }
 
@@ -72,10 +72,11 @@ bool ThreadPool::CheckIdle() {
   return (tasks_.empty() && (current_running_tasks_num_ == 0));
 }
 
-std::shared_ptr<ThreadPool::Top> ThreadPool::GetTop() {
+std::shared_ptr<const ThreadPool::Top> ThreadPool::GetTop() {
   std::unique_lock<std::mutex> latch(tasks_queue_mutex_);
-  return std::make_shared<Top>(Top(workers_.size(), current_running_tasks_num_,
-                                   tasks_.size(), total_processed_tasks_num_));
+  return std::make_shared<const Top>(workers_.size(),
+                                     current_running_tasks_num_, tasks_.size(),
+                                     total_processed_tasks_num_);
 }
 
 void ThreadPool::PrintTop() {

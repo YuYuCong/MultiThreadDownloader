@@ -13,16 +13,15 @@ const std::string kCurlCaInfo = "../app/resource/cacert.pem";
 
 namespace windmill {
 WindmillDownloader::WindmillDownloader()
-    : downloading_thread_count_(0),
-      failed_nodes_count_(0),
+    : remaining_tasks_count_(0),
       max_reconnect_times_(kMaxAllowedReconnectTimes) {}
 
-WindmillDownloader::~WindmillDownloader() {}
+WindmillDownloader::~WindmillDownloader() = default;
 
-long WindmillDownloader::GetDownloadFileSize(const std::string url) {
+long WindmillDownloader::GetDownloadFileSize(const std::string &url) {
   long download_file_size = -1;
   CURL *curl = curl_easy_init();
-  if (NULL == curl) {
+  if (nullptr == curl) {
     return -1;
   }
 
@@ -30,6 +29,8 @@ long WindmillDownloader::GetDownloadFileSize(const std::string url) {
   curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
   curl_easy_setopt(curl, CURLOPT_HEADER, 1);
   curl_easy_setopt(curl, CURLOPT_NOBODY, 1);
+  curl_easy_setopt(curl, CURLOPT_LOW_SPEED_LIMIT, 1L);
+  curl_easy_setopt(curl, CURLOPT_LOW_SPEED_TIME, 10L);
   if (boost::filesystem::exists(kCurlCaInfo)) {
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L);
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 2L);
@@ -53,8 +54,8 @@ long WindmillDownloader::GetDownloadFileSize(const std::string url) {
 size_t WindmillDownloader::MultiThreadWriterCallback(void *ptr, size_t size,
                                                      size_t nmemb,
                                                      void *userdata) {
-  DownloadNode *node = (DownloadNode *)userdata;
-  size_t written = 0;
+  auto *node = (DownloadNode *)userdata;
+  size_t written;
   writer_mutex_.lock();
   if (node->start_pos + size * nmemb <= node->end_pos) {
     fseek(node->fp, node->start_pos, SEEK_SET);
@@ -74,7 +75,7 @@ int WindmillDownloader::MultiThreadDownloadProgressCallback(
     double total_to_upload, double now_uploaded) {
   auto current_thread_id = pthread_self();
 
-  downloadprocess_mutex_.lock();
+  download_process_mutex_.lock();
   if (download_process_statistics_[current_thread_id] > now_downloaded) {
     uint64_t key_backup = current_thread_id;
     while (download_process_statistics_.count(key_backup)) {
@@ -103,7 +104,7 @@ int WindmillDownloader::MultiThreadDownloadProgressCallback(
     }
   }
 
-  downloadprocess_mutex_.unlock();
+  download_process_mutex_.unlock();
   return 0;
 }
 
@@ -116,15 +117,16 @@ void WindmillDownloader::PrintDownloadProgress(double now_downloaded,
 
 int WindmillDownloader::RangeDownloadThreadIns(
     WindmillDownloader *pthis, const std::string &url,
-    std::shared_ptr<DownloadNode> pnode) {
+    const std::shared_ptr<DownloadNode> &pnode) {
   return pthis->RangeDownloadThread(url, pnode);
 }
 
 int WindmillDownloader::RangeDownloadThread(
-    const std::string &url, std::shared_ptr<DownloadNode> download_node) {
+    const std::string &url,
+    const std::shared_ptr<DownloadNode> &download_node) {
   LOG(ERROR) << "launch download thread id:" << std::this_thread::get_id();
   CURL *curl = curl_easy_init();
-  if (NULL == curl) {
+  if (nullptr == curl) {
     return CURLE_FAILED_INIT;
   }
 
@@ -152,9 +154,8 @@ int WindmillDownloader::RangeDownloadThread(
     node_manager_mutex_.lock();
     failed_nodes_.emplace_back(download_node);
     node_manager_mutex_.unlock();
-    failed_nodes_count_++;
   }
-  downloading_thread_count_--;
+  remaining_tasks_count_--;
 
   curl_easy_cleanup(curl);
   return res;
@@ -166,9 +167,10 @@ bool WindmillDownloader::DownloadMission(const int thread_num,
   total_size_to_download_ = 0;
   total_download_last_percent_ = -1;
   download_process_statistics_.clear();
-  failed_nodes_.clear();
 
-  bool download_success = true;
+  node_manager_mutex_.lock();
+  failed_nodes_.clear();
+  node_manager_mutex_.unlock();
 
   total_size_to_download_ = GetDownloadFileSize(url);
   if (total_size_to_download_ <= 0) {
@@ -195,38 +197,53 @@ bool WindmillDownloader::DownloadMission(const int thread_num,
     }
     download_node->fp = fp;
     download_node->reconnect_times = 0;
-    downloading_thread_count_++;
+    remaining_tasks_count_++;
     thread_pool.CommitTask(&WindmillDownloader::RangeDownloadThreadIns, this,
                            url, download_node);
   }
 
-  while ((downloading_thread_count_ > 0 || failed_nodes_count_ > 0) &&
-         download_success) {
-    // LOG(INFO) << "running nodes num:" << downloading_thread_count_;
-    if (failed_nodes_count_ > 0) {
-      LOG(ERROR) << "failed nodes num:" << failed_nodes_count_;
+  bool downloading = true;
+  bool download_success = false;
+  while (downloading) {
+    node_manager_mutex_.lock();
+    if (!failed_nodes_.empty()) {
+      LOG(ERROR) << "failed nodes num:" << failed_nodes_.size();
       LOG(ERROR) << "reconnect...";
-      node_manager_mutex_.lock();
       for (auto &i_node : failed_nodes_) {
         i_node->reconnect_times++;
         LOG(ERROR) << "i_node reconnect times:" << i_node->reconnect_times;
         if (i_node->reconnect_times > max_reconnect_times_) {
           LOG(ERROR) << "failed, reconnect too many times";
           LOG(ERROR) << "download failed! stop other threads!";
+          downloading = false;
           download_success = false;
+          break;
         } else {
           i_node->fp = fp;
-          downloading_thread_count_++;
+          remaining_tasks_count_++;
           thread_pool.CommitTask(&WindmillDownloader::RangeDownloadThreadIns,
                                  this, url, i_node);
         }
       }
-      node_manager_mutex_.unlock();
+      failed_nodes_.clear();
     }
-    node_manager_mutex_.lock();
-    failed_nodes_.clear();
     node_manager_mutex_.unlock();
-    failed_nodes_count_ = 0;
+
+//    auto thread_pool_top = thread_pool.GetTop();
+//    LOG(INFO) << "current_workers_num:" << thread_pool_top->current_workers_num;
+//    LOG(INFO) << "current_running_tasks_num:"
+//              << thread_pool_top->current_running_tasks_num;
+//    LOG(INFO) << "current_remaining_tasks_num:"
+//              << thread_pool_top->current_remaining_tasks_num;
+//    LOG(INFO) << "total_processed_tasks_num:"
+//              << thread_pool_top->total_processed_tasks_num;
+    if (remaining_tasks_count_ > 0) {
+ //   LOG(INFO) << "remaining download tasks num:" << remaining_tasks_count_;
+      downloading = true;
+    } else {
+      downloading = false;
+      download_success = true;
+    }
     std::this_thread::sleep_for(std::chrono::microseconds(800));
   }
 
@@ -245,7 +262,7 @@ long WindmillDownloader::total_size_to_download_ = 0;
 int WindmillDownloader::total_download_last_percent_ = -1;
 std::unordered_map<uint64_t, double>
     WindmillDownloader::download_process_statistics_;
-std::mutex WindmillDownloader::downloadprocess_mutex_;
+std::mutex WindmillDownloader::download_process_mutex_;
 std::mutex WindmillDownloader::writer_mutex_;
 
 }  // namespace windmill

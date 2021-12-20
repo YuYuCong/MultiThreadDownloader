@@ -23,7 +23,24 @@ namespace windmill {
  */
 class ThreadPool {
  public:
-  ThreadPool(unsigned int workers_num = std::thread::hardware_concurrency());
+  struct Top {
+    Top(unsigned int current_workers_num,
+        unsigned int current_running_tasks_num,
+        unsigned int current_remaining_tasks_num,
+        unsigned int total_processed_tasks_num) {
+      this->current_workers_num = current_workers_num;
+      this->current_running_tasks_num = current_running_tasks_num;
+      this->current_remaining_tasks_num = current_remaining_tasks_num;
+      this->total_processed_tasks_num = total_processed_tasks_num;
+    }
+    unsigned int current_workers_num;
+    unsigned int current_running_tasks_num;
+    unsigned int current_remaining_tasks_num;
+    unsigned int total_processed_tasks_num;
+  };
+
+  explicit ThreadPool(
+      unsigned int workers_num = std::thread::hardware_concurrency());
   ~ThreadPool();
 
   /**
@@ -47,26 +64,15 @@ class ThreadPool {
   /**
    * Monitor of the thread-pool
    */
+  std::shared_ptr<const Top> GetTop();
+
+  /**
+   * Monitor of the thread-pool
+   */
   void PrintTop();
 
  private:
   void ThreadProcess();
-
-  struct Top {
-    Top(int current_workers_num, int current_running_tasks_num,
-        int current_remaining_tasks_num, int total_processed_tasks_num) {
-      this->current_workers_num = current_workers_num;
-      this->current_running_tasks_num = current_running_tasks_num;
-      this->current_remaining_tasks_num = current_remaining_tasks_num;
-      this->total_processed_tasks_num = total_processed_tasks_num;
-    }
-    int current_workers_num;
-    int current_running_tasks_num;
-    int current_remaining_tasks_num;
-    int total_processed_tasks_num;
-  };
-
-  std::shared_ptr<Top> GetTop();
 
   unsigned int workers_num_;
 

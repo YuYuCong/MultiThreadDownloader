@@ -19,7 +19,7 @@ class WindmillDownloader {
  public:
   WindmillDownloader();
   ~WindmillDownloader();
-  bool DownloadMission(const int thread_num, const std::string &url,
+  bool DownloadMission(int thread_num, const std::string &url,
                        const std::string &out_file);
 
  private:
@@ -30,7 +30,7 @@ class WindmillDownloader {
     int reconnect_times;
   };
 
-  long GetDownloadFileSize(const std::string url);
+  static long GetDownloadFileSize(const std::string &url);
 
   static size_t MultiThreadWriterCallback(void *ptr, size_t size, size_t nmemb,
                                           void *userdata);
@@ -46,21 +46,21 @@ class WindmillDownloader {
 
   static int RangeDownloadThreadIns(WindmillDownloader *pthis,
                                     const std::string &url,
-                                    std::shared_ptr<DownloadNode> pnode);
+                                    const std::shared_ptr<DownloadNode> &pnode);
 
   int RangeDownloadThread(const std::string &url,
-                          std::shared_ptr<DownloadNode> pnode);
+                          const std::shared_ptr<DownloadNode> &pnode);
 
-  std::atomic<int> downloading_thread_count_;
-  std::atomic<int> failed_nodes_count_;
-  int max_reconnect_times_;
-
+  std::atomic<int> remaining_tasks_count_;
   static long total_size_to_download_;
   static int total_download_last_percent_;
+
+  static std::mutex download_process_mutex_;
   static std::unordered_map<uint64_t, double> download_process_statistics_;
-  static std::mutex downloadprocess_mutex_;
+
   static std::mutex writer_mutex_;
 
+  int max_reconnect_times_;
   std::mutex node_manager_mutex_;
   std::vector<std::shared_ptr<DownloadNode>> failed_nodes_;
 };
