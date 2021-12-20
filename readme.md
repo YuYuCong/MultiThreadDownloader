@@ -16,6 +16,8 @@ Ubuntu 16.04 or Ubuntu 18.04
 
 - curl
 - thread
+- glog
+- boost (filesystem)
 
 ```
 $ sudo apt-get install curl
@@ -24,16 +26,19 @@ $ sudo apt-get install curl
 #### Build
 
 ```shell
-$ g++ ./windmill_downloader.cpp -o downloader -lcurl -lpthread -std=c++14
+$ mkdir build
+$ cd build
+$ cmake ..
+$ make -j
 ```
 
 #### Usage
 
 ```shell
-$ ./downloader <thread_num> <url> <output_file>
+$ ./windmill_downloader <thread_num> <url> <output_file>
 # example:
-$ ./downloader 32 https://releases.ubuntu.com/20.04/ubuntu-20.04.3-desktop-amd64.iso ./ubuntu-20.04.3-desktop-amd64.iso
-$ ./downloader 8 http://www.gecif.net/articles/mathematiques/pi/pi_1_million.txt ./pi_1_million.txt
+$ ./windmill_downloader 32 https://releases.ubuntu.com/20.04/ubuntu-20.04.3-desktop-amd64.iso ./ubuntu-20.04.3-desktop-amd64.iso
+$ ./windmill_downloader 8 http://www.gecif.net/articles/mathematiques/pi/pi_1_million.txt ./pi_1_million.txt
 ```
 
 #### Contact
