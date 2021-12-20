@@ -50,18 +50,6 @@ class ThreadPool {
   void PrintTop();
 
  private:
-  unsigned int workers_num_;
-
-  std::vector<std::thread> workers_;
-  std::deque<std::function<void()>> tasks_;
-
-  std::mutex tasks_queue_mutex_;
-  std::condition_variable cv_task_;
-
-  bool shutdown_;
-  std::atomic_uint current_running_tasks_num_;
-  std::atomic_uint total_processed_tasks_num_;
-
   void ThreadProcess();
 
   struct Top {
@@ -79,29 +67,19 @@ class ThreadPool {
   };
 
   std::shared_ptr<Top> GetTop();
+
+  unsigned int workers_num_;
+
+  std::vector<std::thread> workers_;
+  std::deque<std::function<void()>> tasks_;
+
+  std::mutex tasks_queue_mutex_;
+  std::condition_variable cv_task_;
+
+  bool shutdown_;
+  std::atomic_uint current_running_tasks_num_;
+  std::atomic_uint total_processed_tasks_num_;
 };
-
-template <class F, class... Args>
-auto ThreadPool::CommitTask(F &&f, Args &&...args)
-    -> std::future<typename std::result_of<F(Args...)>::type> {
-  using return_type = typename std::result_of<F(Args...)>::type;
-
-  auto task = std::make_shared<std::packaged_task<return_type()>>(
-      std::bind(std::forward<F>(f), std::forward<Args>(args)...));
-
-  std::future<return_type> res = task->get_future();
-  {
-    std::unique_lock<std::mutex> lock(tasks_queue_mutex_);
-    // don't allow enqueueing after stopping the pool
-    if (shutdown_) {
-      throw std::runtime_error("enqueue on stopped ThreadPool");
-    }
-
-    tasks_.emplace_back([task]() { (*task)(); });
-  }
-  cv_task_.notify_one();
-  return res;
-}
 
 ThreadPool::ThreadPool(unsigned int workers_num)
     : workers_num_(workers_num < kMaxAllowedWorkers ? workers_num
@@ -124,6 +102,28 @@ ThreadPool::~ThreadPool() {
       worker.join();
     }
   }
+}
+
+template <class F, class... Args>
+auto ThreadPool::CommitTask(F &&f, Args &&...args)
+    -> std::future<typename std::result_of<F(Args...)>::type> {
+  using return_type = typename std::result_of<F(Args...)>::type;
+
+  auto task = std::make_shared<std::packaged_task<return_type()>>(
+      std::bind(std::forward<F>(f), std::forward<Args>(args)...));
+
+  std::future<return_type> res = task->get_future();
+  {
+    std::unique_lock<std::mutex> lock(tasks_queue_mutex_);
+    // don't allow enqueueing after stopping the pool
+    if (shutdown_) {
+      throw std::runtime_error("enqueue on stopped ThreadPool");
+    }
+
+    tasks_.emplace_back([task]() { (*task)(); });
+  }
+  cv_task_.notify_one();
+  return res;
 }
 
 void ThreadPool::ThreadProcess() {
@@ -216,7 +216,7 @@ class WindmillDownloader {
     int reconnect_times;
   };
 
-  long GetDownloadFileLenth(const std::string url);
+  long GetDownloadFileSize(const std::string url);
 
   static size_t MultiThreadWriterCallback(void *ptr, size_t size, size_t nmemb,
                                           void *userdata);
@@ -236,6 +236,7 @@ class WindmillDownloader {
 
   int RangeDownloadThread(const std::string &url,
                           std::shared_ptr<DownloadNode> pnode);
+
   std::atomic<int> downloading_thread_count_;
   std::atomic<int> failed_nodes_count_;
   int max_reconnect_times_;
@@ -257,8 +258,8 @@ WindmillDownloader::WindmillDownloader()
 
 WindmillDownloader::~WindmillDownloader() {}
 
-long WindmillDownloader::GetDownloadFileLenth(const std::string url) {
-  long download_file_lenth = -1;
+long WindmillDownloader::GetDownloadFileSize(const std::string url) {
+  long download_file_size = -1;
   CURL *curl = curl_easy_init();
   if (NULL == curl) {
     return -1;
@@ -279,19 +280,20 @@ long WindmillDownloader::GetDownloadFileLenth(const std::string url) {
   //  }
   if (CURLE_OK == curl_easy_perform(curl)) {
     curl_easy_getinfo(curl, CURLINFO_CONTENT_LENGTH_DOWNLOAD_T, &cl);
-    download_file_lenth = long(cl);
+    download_file_size = long(cl);
   } else {
     LOG(ERROR) << "file size check failed!";
     PrintEndl;
   }
   curl_easy_cleanup(curl);
-  LOG(ERROR) << "download_file_lenth: " << download_file_lenth;
+  LOG(ERROR) << "download_file_size: " << download_file_size;
   PrintEndl;
-  return download_file_lenth;
+  return download_file_size;
 }
 
 size_t WindmillDownloader::MultiThreadWriterCallback(void *ptr, size_t size,
-                                                size_t nmemb, void *userdata) {
+                                                     size_t nmemb,
+                                                     void *userdata) {
   DownloadNode *node = (DownloadNode *)userdata;
   size_t written = 0;
   writer_mutex_.lock();
@@ -308,11 +310,9 @@ size_t WindmillDownloader::MultiThreadWriterCallback(void *ptr, size_t size,
   return written;
 }
 
-int WindmillDownloader::MultiThreadDownloadProgressCallback(void *ptr,
-                                                       double total_to_download,
-                                                       double now_downloaded,
-                                                       double total_to_upload,
-                                                       double now_uploaded) {
+int WindmillDownloader::MultiThreadDownloadProgressCallback(
+    void *ptr, double total_to_download, double now_downloaded,
+    double total_to_upload, double now_uploaded) {
   auto current_thread_id = pthread_self();
 
   downloadprocess_mutex_.lock();
@@ -349,16 +349,16 @@ int WindmillDownloader::MultiThreadDownloadProgressCallback(void *ptr,
 }
 
 void WindmillDownloader::PrintDownloadProgress(double now_downloaded,
-                                          double total_to_download) {
+                                               double total_to_download) {
   LOG(ERROR) << "[download] progress: " << now_downloaded / 1024 << "/"
              << total_to_download / 1024 << " kbytes  "
              << "(" << now_downloaded * 100 / total_to_download << "%)";
   PrintEndl;
 }
 
-int WindmillDownloader::RangeDownloadThreadIns(WindmillDownloader *pthis,
-                                          const std::string &url,
-                                          std::shared_ptr<DownloadNode> pnode) {
+int WindmillDownloader::RangeDownloadThreadIns(
+    WindmillDownloader *pthis, const std::string &url,
+    std::shared_ptr<DownloadNode> pnode) {
   return pthis->RangeDownloadThread(url, pnode);
 }
 
@@ -405,8 +405,8 @@ int WindmillDownloader::RangeDownloadThread(
 }
 
 bool WindmillDownloader::DownloadMission(const int thread_num,
-                                    const std::string &url,
-                                    const std::string &out_file) {
+                                         const std::string &url,
+                                         const std::string &out_file) {
   total_size_to_download_ = 0;
   total_download_last_percent_ = -1;
   download_process_statistics_.clear();
@@ -414,9 +414,9 @@ bool WindmillDownloader::DownloadMission(const int thread_num,
 
   bool download_success = true;
 
-  total_size_to_download_ = GetDownloadFileLenth(url);
+  total_size_to_download_ = GetDownloadFileSize(url);
   if (total_size_to_download_ <= 0) {
-    LOG(ERROR) << "get the file length error...";
+    LOG(ERROR) << "get file size error...";
     PrintEndl;
     return false;
   }
@@ -441,8 +441,8 @@ bool WindmillDownloader::DownloadMission(const int thread_num,
     download_node->fp = fp;
     download_node->reconnect_times = 0;
     downloading_thread_count_++;
-    thread_pool.CommitTask(&WindmillDownloader::RangeDownloadThreadIns, this, url,
-                           download_node);
+    thread_pool.CommitTask(&WindmillDownloader::RangeDownloadThreadIns, this,
+                           url, download_node);
   }
 
   while ((downloading_thread_count_ > 0 || failed_nodes_count_ > 0) &&
@@ -467,8 +467,8 @@ bool WindmillDownloader::DownloadMission(const int thread_num,
         } else {
           i_node->fp = fp;
           downloading_thread_count_++;
-          thread_pool.CommitTask(&WindmillDownloader::RangeDownloadThreadIns, this,
-                                 url, i_node);
+          thread_pool.CommitTask(&WindmillDownloader::RangeDownloadThreadIns,
+                                 this, url, i_node);
         }
       }
       node_manager_mutex_.unlock();
