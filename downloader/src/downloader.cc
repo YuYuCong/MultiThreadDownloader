@@ -173,7 +173,6 @@ bool WindmillDownloader::DownloadMission(const int thread_num,
   total_size_to_download_ = GetDownloadFileSize(url);
   if (total_size_to_download_ <= 0) {
     LOG(ERROR) << "get file size error...";
-
     return false;
   }
   FILE *fp = fopen(out_file.c_str(), "wb");
@@ -206,19 +205,14 @@ bool WindmillDownloader::DownloadMission(const int thread_num,
     // LOG(INFO) << "running nodes num:" << downloading_thread_count_;
     if (failed_nodes_count_ > 0) {
       LOG(ERROR) << "failed nodes num:" << failed_nodes_count_;
-
       LOG(ERROR) << "reconnect...";
-
       node_manager_mutex_.lock();
       for (auto &i_node : failed_nodes_) {
         i_node->reconnect_times++;
         LOG(ERROR) << "i_node reconnect times:" << i_node->reconnect_times;
-
         if (i_node->reconnect_times > max_reconnect_times_) {
           LOG(ERROR) << "failed, reconnect too many times";
-
           LOG(ERROR) << "download failed! stop other threads!";
-
           download_success = false;
         } else {
           i_node->fp = fp;
@@ -241,11 +235,9 @@ bool WindmillDownloader::DownloadMission(const int thread_num,
   fclose(fp);
   if (!download_success) {
     LOG(ERROR) << "download failed!";
-
     return false;
   }
   LOG(ERROR) << "download finished.";
-
   return true;
 }
 
