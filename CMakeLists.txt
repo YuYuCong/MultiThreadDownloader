@@ -187,7 +187,7 @@ endif ()
 ### thread_pool (user define lib)
 user_add_library(NAME thread_pool
         INCLUDES "${CMAKE_CURRENT_SOURCE_DIR}/threadpool/include"
-        SRCS ""
+        SRCS "${CMAKE_CURRENT_SOURCE_DIR}/threadpool/src/threadpool.cc"
         LINKS
         boost
         glog
