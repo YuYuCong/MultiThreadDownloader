@@ -29,8 +29,6 @@ long WindmillDownloader::GetDownloadFileSize(const std::string &url) {
   curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
   curl_easy_setopt(curl, CURLOPT_HEADER, 1);
   curl_easy_setopt(curl, CURLOPT_NOBODY, 1);
-  curl_easy_setopt(curl, CURLOPT_LOW_SPEED_LIMIT, 1L);
-  curl_easy_setopt(curl, CURLOPT_LOW_SPEED_TIME, 10L);
   if (boost::filesystem::exists(kCurlCaInfo)) {
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L);
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 2L);
@@ -40,6 +38,9 @@ long WindmillDownloader::GetDownloadFileSize(const std::string &url) {
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L);
   }
+  curl_easy_setopt(curl, CURLOPT_LOW_SPEED_TIME, 10L);
+  curl_easy_setopt(curl, CURLOPT_LOW_SPEED_LIMIT, 20L);
+  curl_easy_setopt(curl, CURLOPT_TIMEOUT, 10);
   if (CURLE_OK == curl_easy_perform(curl)) {
     curl_easy_getinfo(curl, CURLINFO_CONTENT_LENGTH_DOWNLOAD_T, &cl);
     download_file_size = long(cl);
@@ -143,8 +144,9 @@ int WindmillDownloader::RangeDownloadThread(
   curl_easy_setopt(curl, CURLOPT_PROGRESSFUNCTION,
                    MultiThreadDownloadProgressCallback);
   curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
-  curl_easy_setopt(curl, CURLOPT_LOW_SPEED_LIMIT, 1L);
   curl_easy_setopt(curl, CURLOPT_LOW_SPEED_TIME, 10L);
+  curl_easy_setopt(curl, CURLOPT_LOW_SPEED_LIMIT, 20L);
+  curl_easy_setopt(curl, CURLOPT_TIMEOUT, 10);
   curl_easy_setopt(curl, CURLOPT_RANGE, range);
 
   int res = curl_easy_perform(curl);
