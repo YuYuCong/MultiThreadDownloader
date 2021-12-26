@@ -1,20 +1,18 @@
-[中文说明](https://github.com/YuYuCong/Downloader/blob/main/readme-zh.md)
-
 # WindmillDownloader
 
-WindmillDownloader is a web downloader.
+这是一个多线程下载器.
 
-#### Feature
+#### 性能
 
-- Thread pool.
-- MultiThread Download.
-- Break point reconnect.
+- 线程池.
+- 多线程下载.
+- 断点续传.
 
-#### Platform
+#### 平台
 
-Ubuntu.
+Ubuntu
 
-#### Dependencies
+#### 依赖安装
 
 - curl
 - thread
@@ -56,7 +54,7 @@ $ make -j12
 $ make install
 ```
 
-#### Build
+#### 编译
 
 ```shell
 $ mkdir build
@@ -65,19 +63,18 @@ $ cmake ..
 $ make -j
 ```
 
-#### Usage
+#### 使用
 
 ```shell
 $ ./windmill_downloader [--thread_num <thread_num>] --url <url> [--out_file <output_file>]
-# example:
+# 例子:
 $ ./windmill_downloader --thread_num 32 --url https://releases.ubuntu.com/20.04/ubuntu-20.04.3-desktop-amd64.iso --out_file ./ubuntu-20.04.3-desktop-amd64.iso
 $ ./windmill_downloader --url http://www.gecif.net/articles/mathematiques/pi/pi_1_million.txt --out_file pi_1_million.txt
 ```
 
-#### Contact
+#### 联系
 
-Feel free to contact me [windmillyucong@163.com](mailto:windmillyucong@163.com)
-anytime for anything.
+欢迎邮件联系 [windmillyucong@163.com](mailto:windmillyucong@163.com).
 
 #### License
 
